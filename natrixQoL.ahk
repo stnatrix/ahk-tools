@@ -3,7 +3,7 @@
 #UseHook true
 Persistent(true)
 
-global APP_VERSION := "2.1.0"
+global APP_VERSION := "2.1.1"
 
 SetWorkingDir(A_ScriptDir)
 
@@ -392,32 +392,32 @@ NotifyQoL(title, text) {
 }
 
 ShowRTSS() {
+    DetectHiddenWindows(true)
+    dummyHwnd := WinExist("RTSS ahk_exe RTSS.exe")
+    if dummyHwnd {
+        WinHide(dummyHwnd)
+    }
+
     DetectHiddenWindows(false)
-    if WinExist("ahk_exe RTSS.exe") {
-        WinActivate("ahk_exe RTSS.exe")
+    guiHwnd := WinExist("RivaTunerStatisticsServer ahk_exe RTSS.exe")
+    if guiHwnd {
+        WinRestore(guiHwnd)
+        WinActivate(guiHwnd)
         return
     }
 
-    DetectHiddenWindows(true)
-    hwndList := WinGetList("ahk_exe RTSS.exe")
-    if (hwndList.Length > 0) {
-        for hwnd in hwndList {
-            try {
-                PostMessage(0x8001, 0, 0x0202, , hwnd)
-                WinShow(hwnd)
-                WinRestore(hwnd)
-                WinActivate(hwnd)
-            }
+    if dummyHwnd {
+        PostMessage(0x8001, 0, 0x0202, , dummyHwnd)
+        if WinWait("RivaTunerStatisticsServer ahk_exe RTSS.exe", , 1) {
+            WinRestore("RivaTunerStatisticsServer ahk_exe RTSS.exe")
+            WinActivate("RivaTunerStatisticsServer ahk_exe RTSS.exe")
+            return
         }
     }
 
-    Sleep(50)
-    DetectHiddenWindows(false)
-    if !WinExist("ahk_exe RTSS.exe") {
-        rtssPath := FindRTSS()
-        if (rtssPath != "") {
-            Run('"' rtssPath '" /x')
-        }
+    rtssPath := FindRTSS()
+    if (rtssPath != "") {
+        Run('"' rtssPath '"')
     }
 }
 
