@@ -1,0 +1,7 @@
+__pycache__/
+*.pid
+*.paused
+*.muted
+*.log
+pynatrix*
+*.onnx
