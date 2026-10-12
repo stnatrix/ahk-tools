@@ -3,7 +3,7 @@
 #UseHook true
 Persistent(true)
 
-global APP_VERSION := "2.1.1"
+global APP_VERSION := "2.2.0"
 
 SetWorkingDir(A_ScriptDir)
 
@@ -22,9 +22,14 @@ global SEVEN_CLI := sevenZip.cli
 global SEVEN_GUI := sevenZip.gui
 global ARCHIVE_EXT := "zip|rar|7z|tar|gz|tgz|bz2|tbz|tbz2|xz|txz|zst|tzst|iso|cab|arj|lzh|lha|wim|001|z01|r00"
 global OVERWRITE_MODE := "-aou"
+global PNG_CLIP_FMT := DllCall("RegisterClipboardFormat", "str", "PNG", "uint")
+global lastClipSeq := 0
+global lastClipImagePath := ""
 
-A_IconTip := "natrixQoL " APP_VERSION " (QuickExtract | AutoType)"
+A_IconTip := "natrixQoL " APP_VERSION " (QuickExtract | AutoType | SnipPath)"
 SetupTrayMenu()
+CleanupOldTempSnips()
+OnClipboardChange(OnClipChange)
 
 SetupTrayMenu() {
     tray := A_TrayMenu
@@ -36,10 +41,10 @@ SetupTrayMenu() {
 
     helpMenu := Menu()
     helpMenu.Add("Ctrl+Shift+Win - Quick Extract Archive", (*) => "")
-    helpMenu.Add("Ctrl+Shift+Alt - Type 0000 + Enter", (*) => "")
     helpMenu.Add("Ctrl+Shift+F2  - Type Email", (*) => "")
     helpMenu.Add("Ctrl+Shift+F3  - Generate & Type Password", (*) => "")
     helpMenu.Add("Ctrl+Shift+F4  - Show RTSS Window", (*) => "")
+    helpMenu.Add("Ctrl+V (Dialog) - Paste Clipboard Image Temp Path", (*) => "")
     for idx in [1, 2, 3, 4, 5]
         helpMenu.Disable(idx "&")
     tray.Add("Hotkey Cheatsheet", helpMenu)
@@ -57,21 +62,11 @@ CtrlShiftHeld() {
 #HotIf CtrlShiftHeld()
 *LWin::ExtractSelection()
 *RWin::ExtractSelection()
-*LAlt::Type0000()
-*RAlt::Type0000()
 #HotIf
 
-^!Shift::Type0000()
-^+Alt::Type0000()
-!+Ctrl::Type0000()
-
-Type0000() {
-    SendInput("{Ctrl Up}{Alt Up}{Shift Up}")
-    Sleep(25)
-    SendEvent("0000")
-    Sleep(25)
-    SendEvent("{Enter}")
-}
+#HotIf ShouldPasteImagePath()
+$^v::PasteClipboardImagePath()
+#HotIf
 
 ^+F2::
 {
@@ -436,3 +431,158 @@ FindRTSS() {
         return defPath
     return ""
 }
+
+OnClipChange(dataType) {
+    if (dataType = 2)
+        SetTimer(PreCacheClipboardImage, -200)
+}
+
+PreCacheClipboardImage() {
+    if HasClipboardImageOnly()
+        GetOrSaveClipboardImagePath()
+}
+
+HasClipboardImageOnly() {
+    global PNG_CLIP_FMT
+    if DllCall("IsClipboardFormatAvailable", "uint", 13)
+        return false
+    if DllCall("IsClipboardFormatAvailable", "uint", 15)
+        return false
+    hasPng := PNG_CLIP_FMT && DllCall("IsClipboardFormatAvailable", "uint", PNG_CLIP_FMT)
+    hasBmp := DllCall("IsClipboardFormatAvailable", "uint", 2)
+    return (hasPng || hasBmp)
+}
+
+ShouldPasteImagePath() {
+    if !HasClipboardImageOnly()
+        return false
+    if WinActive("ahk_class #32770")
+        return true
+    try {
+        ctrl := ControlGetFocus("A")
+        if ctrl {
+            cls := ControlGetClassNN(ctrl)
+            if RegExMatch(cls, "^Edit\d+$")
+                return true
+        }
+    }
+    return false
+}
+
+PasteClipboardImagePath() {
+    path := GetOrSaveClipboardImagePath()
+    if (path = "") {
+        SendInput("^v")
+        return
+    }
+
+    try {
+        ctrl := ControlGetFocus("A")
+        if ctrl {
+            cls := ControlGetClassNN(ctrl)
+            if RegExMatch(cls, "^Edit\d+$") {
+                EditPaste(path, cls, "A")
+                return
+            }
+        }
+    }
+
+    if WinActive("ahk_class #32770") {
+        try {
+            ControlFocus("Edit1", "A")
+            ControlSetText("", "Edit1", "A")
+            EditPaste(path, "Edit1", "A")
+            return
+        }
+    }
+
+    SendText(path)
+}
+
+GetOrSaveClipboardImagePath() {
+    global lastClipSeq, lastClipImagePath
+    seq := DllCall("GetClipboardSequenceNumber", "uint")
+    if (seq != 0 && seq = lastClipSeq && lastClipImagePath != "" && FileExist(lastClipImagePath))
+        return lastClipImagePath
+
+    path := SaveClipboardImageToTemp()
+    if (path != "") {
+        lastClipSeq := seq
+        lastClipImagePath := path
+    }
+    return path
+}
+
+SaveClipboardImageToTemp() {
+    global PNG_CLIP_FMT
+    hasPng := PNG_CLIP_FMT && DllCall("IsClipboardFormatAvailable", "uint", PNG_CLIP_FMT)
+    hasBmp := DllCall("IsClipboardFormatAvailable", "uint", 2)
+    if (!hasPng && !hasBmp)
+        return ""
+
+    outPath := A_Temp "\snip_" A_Now "_" A_MSec ".png"
+
+    opened := false
+    Loop 5 {
+        if DllCall("OpenClipboard", "ptr", A_ScriptHwnd) {
+            opened := true
+            break
+        }
+        Sleep(30)
+    }
+    if !opened
+        return ""
+
+    if hasPng {
+        hData := DllCall("GetClipboardData", "uint", PNG_CLIP_FMT, "ptr")
+        if hData {
+            pData := DllCall("GlobalLock", "ptr", hData, "ptr")
+            sz := DllCall("GlobalSize", "ptr", hData, "uptr")
+            if (pData && sz > 0) {
+                try {
+                    f := FileOpen(outPath, "w")
+                    f.RawWrite(pData, sz)
+                    f.Close()
+                }
+                DllCall("GlobalUnlock", "ptr", hData)
+                DllCall("CloseClipboard")
+                if FileExist(outPath)
+                    return outPath
+            } else if pData {
+                DllCall("GlobalUnlock", "ptr", hData)
+            }
+        }
+    }
+
+    if hasBmp {
+        hBm := DllCall("GetClipboardData", "uint", 2, "ptr")
+        if hBm {
+            DllCall("LoadLibrary", "str", "gdiplus", "ptr")
+            tok := 0
+            gsi := Buffer(24, 0)
+            NumPut("uint", 1, gsi, 0)
+            if (DllCall("gdiplus\GdiplusStartup", "ptr*", &tok, "ptr", gsi, "ptr", 0) = 0) {
+                pBmp := 0
+                if (DllCall("gdiplus\GdipCreateBitmapFromHBITMAP", "ptr", hBm, "ptr", 0, "ptr*", &pBmp) = 0 && pBmp) {
+                    clsid := Buffer(16, 0)
+                    DllCall("ole32\CLSIDFromString", "wstr", "{557CF406-1A04-11D3-9A73-0000F81EF32E}", "ptr", clsid)
+                    DllCall("gdiplus\GdipSaveImageToFile", "ptr", pBmp, "wstr", outPath, "ptr", clsid, "ptr", 0)
+                    DllCall("gdiplus\GdipDisposeImage", "ptr", pBmp)
+                }
+                DllCall("gdiplus\GdiplusShutdown", "ptr", tok)
+            }
+        }
+    }
+
+    DllCall("CloseClipboard")
+    return FileExist(outPath) ? outPath : ""
+}
+
+CleanupOldTempSnips() {
+    cutoff := DateAdd(A_Now, -24, "Hours")
+    Loop Files, A_Temp "\snip_*.png" {
+        if (DateDiff(A_LoopFileTimeModified, cutoff, "Seconds") < 0)
+            try FileDelete(A_LoopFileFullPath)
+    }
+}
+
