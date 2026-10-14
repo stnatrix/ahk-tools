@@ -3,7 +3,7 @@
 #UseHook true
 Persistent(true)
 
-global APP_VERSION := "2.2.0"
+global APP_VERSION := "2.3.0"
 
 SetWorkingDir(A_ScriptDir)
 
@@ -44,8 +44,9 @@ SetupTrayMenu() {
     helpMenu.Add("Ctrl+Shift+F2  - Type Email", (*) => "")
     helpMenu.Add("Ctrl+Shift+F3  - Generate & Type Password", (*) => "")
     helpMenu.Add("Ctrl+Shift+F4  - Show RTSS Window", (*) => "")
+    helpMenu.Add("Ctrl+Shift+F5  - Open Gemini", (*) => "")
     helpMenu.Add("Ctrl+V (Dialog) - Paste Clipboard Image Temp Path", (*) => "")
-    for idx in [1, 2, 3, 4, 5]
+    for idx in [1, 2, 3, 4, 5, 6]
         helpMenu.Disable(idx "&")
     tray.Add("Hotkey Cheatsheet", helpMenu)
 
@@ -87,6 +88,11 @@ $^v::PasteClipboardImagePath()
 ^+F4::
 {
     ShowRTSS()
+}
+
+^+F5::
+{
+    Run("https://gemini.google.com")
 }
 
 GenerateComplexPassword(length := 16) {
