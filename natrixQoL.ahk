@@ -39,7 +39,7 @@ SetupTrayMenu() {
     tray.Add()
 
     helpMenu := Menu()
-    helpMenu.Add("Ctrl+Shift+Win - Quick Extract Archive", (*) => "")
+    helpMenu.Add("Ctrl+Shift+Win - Quick Extract / Pack", (*) => "")
     helpMenu.Add("Ctrl+Shift+F2  - Type Email", (*) => "")
     helpMenu.Add("Ctrl+Shift+F3  - Generate & Type Password", (*) => "")
     helpMenu.Add("Ctrl+Shift+F4  - Show RTSS Window", (*) => "")
@@ -54,8 +54,8 @@ SetupTrayMenu() {
     tray.Add("Exit", (*) => ExitApp())
 }
 
-^+LWin::ExtractSelection()
-^+RWin::ExtractSelection()
+^+LWin::HandleSelectionAction()
+^+RWin::HandleSelectionAction()
 
 #HotIf ShouldPasteImagePath()
 $^v::PasteClipboardImagePath()
@@ -119,7 +119,7 @@ GenerateComplexPassword(length := 16) {
     return shuffled
 }
 
-ExtractSelection() {
+HandleSelectionAction() {
     static lastSeen := 0
     now := A_TickCount
     if ((now - lastSeen) <= 800)
@@ -128,23 +128,66 @@ ExtractSelection() {
 
     selection := GetExplorerSelection()
     if (selection.Length = 0) {
-        NotifyQoL("Nothing Selected", "Focus Explorer or Desktop and select an archive.")
+        NotifyQoL("Nothing Selected", "Focus Explorer or Desktop and select files.")
         return
     }
 
-    jobs := []
+    archiveJobs := []
+    packJobs := []
     for path in selection {
         if IsExtractable(path)
-            jobs.Push(path)
+            archiveJobs.Push(path)
+        else
+            packJobs.Push(path)
     }
-    if (jobs.Length = 0) {
-        NotifyQoL("No Archives Selected", "Supported formats: " StrReplace(ARCHIVE_EXT, "|", " "))
+
+    if (archiveJobs.Length > 0) {
+        for path in archiveJobs {
+            ExtractArchive(path, archiveJobs.Length > 1)
+        }
         return
     }
 
-    for path in jobs {
-        ExtractArchive(path, jobs.Length > 1)
+    if (packJobs.Length > 0) {
+        PackSelection(packJobs)
+        return
     }
+}
+
+PackSelection(items) {
+    global SEVEN_GUI
+    if (items.Length = 0)
+        return
+
+    SplitPath(items[1], &firstName, &dir, &firstExt, &firstStem)
+    if (dir == "")
+        dir := A_Desktop
+
+    if (items.Length = 1) {
+        baseArchive := firstStem ".zip"
+    } else {
+        SplitPath(dir, &parentName)
+        baseArchive := (parentName != "" ? parentName : "Archive") ".zip"
+    }
+
+    targetPath := dir "\" baseArchive
+    if FileExist(targetPath) {
+        stem := RegExReplace(baseArchive, "\.zip$", "")
+        idx := 1
+        while FileExist(dir "\" stem "_" idx ".zip")
+            idx++
+        targetPath := dir "\" stem "_" idx ".zip"
+    }
+
+    cmdArgs := ""
+    for path in items {
+        cmdArgs .= ' ' . EscapeArg(path)
+    }
+
+    SplitPath(targetPath, &targetName)
+    cmd := '"' SEVEN_GUI '" a -tzip -- "' targetPath '"' cmdArgs
+    NotifyQoL("Packing Started", targetName)
+    Run(cmd, dir)
 }
 
 ExtractArchive(path, wait := false) {
