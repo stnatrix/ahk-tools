@@ -3,7 +3,7 @@
 #UseHook true
 Persistent(true)
 
-global APP_VERSION := "2.3.0"
+global APP_VERSION := "2.4.0"
 
 SetWorkingDir(A_ScriptDir)
 
@@ -25,7 +25,7 @@ global PNG_CLIP_FMT := DllCall("RegisterClipboardFormat", "str", "PNG", "uint")
 global lastClipSeq := 0
 global lastClipImagePath := ""
 
-A_IconTip := "natrixQoL " APP_VERSION " (QuickExtract | AutoType | SnipPath)"
+A_IconTip := "natrixQoL " APP_VERSION " (QuickExtract/Pack | AutoType | SnipPath)"
 SetupTrayMenu()
 CleanupOldTempSnips()
 OnClipboardChange(OnClipChange)
