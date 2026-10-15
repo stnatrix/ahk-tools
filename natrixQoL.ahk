@@ -505,8 +505,8 @@ HasClipboardImageOnly() {
 ShouldPasteImagePath() {
     if !HasClipboardImageOnly()
         return false
-    if WinActive("ahk_class #32770")
-        return true
+    if !WinActive("ahk_class #32770")
+        return false
     try {
         ctrl := ControlGetFocus("A")
         if ctrl {
@@ -514,6 +514,8 @@ ShouldPasteImagePath() {
             if RegExMatch(cls, "^Edit\d+$")
                 return true
         }
+        if ControlGetHwnd("Edit1", "A")
+            return true
     }
     return false
 }
