@@ -164,7 +164,7 @@ ExtractArchive(path, wait := false) {
             }
 
             candidate := ib.Value
-            if VerifyPassword(path, candidate) {
+            if VerifyPassword(path, candidate, info.isHeaderEncrypted, info.testFile) {
                 password := candidate
                 info := AnalyzeArchive(path, password)
                 break
@@ -186,21 +186,19 @@ ExtractArchive(path, wait := false) {
 
 AnalyzeArchive(path, password := "") {
     global SEVEN_CLI
-    static counter := 0
-    tmp := A_Temp "\quick_extract_" A_TickCount "_" (++counter) "_" Random(1000, 9999) ".txt"
-
     passArg := (password != "") ? (' -p' . EscapeArg(password)) : ' -p""'
-    cmd := A_ComSpec ' /c ""' SEVEN_CLI '" l -slt -ba -sccUTF-8' passArg ' -- "' path '" > "' tmp '" 2>&1"'
+    cmd := '"' SEVEN_CLI '" l -slt -ba -sccUTF-8' passArg ' -- "' path '"'
 
-    exitCode := RunWait(cmd, , "Hide")
-    txt := ""
-    try txt := FileRead(tmp, "UTF-8")
-    try FileDelete(tmp)
+    res := RunWaitStdout(cmd)
+    txt := res.output
+    exitCode := res.exitCode
 
     isHeaderEncrypted := (exitCode != 0) || RegExMatch(txt, "i)(Cannot open encrypted archive|Headers Error|Wrong password)")
     if isHeaderEncrypted {
         return {
             needPassword: true,
+            isHeaderEncrypted: true,
+            testFile: "",
             wrongPassword: (password != ""),
             needsOwnFolder: true,
             roots: Map()
@@ -209,24 +207,29 @@ AnalyzeArchive(path, password := "") {
 
     roots := Map()
     hasEncryptedData := false
+    firstEncryptedFile := ""
+    currentPath := ""
 
     for line in StrSplit(txt, "`n", "`r") {
         if (SubStr(line, 1, 7) = "Path = ") {
-            rel := SubStr(line, 8)
-            parts := StrSplit(rel, ["\", "/"])
+            currentPath := SubStr(line, 8)
+            parts := StrSplit(currentPath, ["\", "/"])
             if (parts.Length > 0 && parts[1] != "")
                 roots[parts[1]] := true
         } else if (SubStr(line, 1, 12) = "Encrypted = +") {
             hasEncryptedData := true
+            if (firstEncryptedFile == "" && currentPath != "")
+                firstEncryptedFile := currentPath
         }
     }
 
-    isEncrypted := hasEncryptedData
     needsOwnFolder := (roots.Count != 1)
 
-    if (isEncrypted && password == "") {
+    if (hasEncryptedData && password == "") {
         return {
             needPassword: true,
+            isHeaderEncrypted: false,
+            testFile: firstEncryptedFile,
             wrongPassword: false,
             needsOwnFolder: needsOwnFolder,
             roots: roots
@@ -235,25 +238,73 @@ AnalyzeArchive(path, password := "") {
 
     return {
         needPassword: false,
+        isHeaderEncrypted: false,
+        testFile: "",
         wrongPassword: false,
         needsOwnFolder: needsOwnFolder,
         roots: roots
     }
 }
 
-VerifyPassword(path, password) {
+VerifyPassword(path, password, isHeaderEncrypted := false, testFile := "") {
     global SEVEN_CLI
-    static counter := 0
-    tmp := A_Temp "\quick_extract_v_" A_TickCount "_" (++counter) "_" Random(1000, 9999) ".txt"
-    cmd := A_ComSpec ' /c ""' SEVEN_CLI '" t -p' EscapeArg(password) ' -- "' path '" > "' tmp '" 2>&1"'
-    exitCode := RunWait(cmd, , "Hide")
-    txt := ""
-    try txt := FileRead(tmp, "UTF-8")
-    try FileDelete(tmp)
+    if isHeaderEncrypted {
+        cmd := '"' SEVEN_CLI '" l -slt -ba -sccUTF-8 -p' EscapeArg(password) ' -- "' path '"'
+        res := RunWaitStdout(cmd)
+        if (res.exitCode != 0 || RegExMatch(res.output, "i)(Wrong password|Cannot open encrypted archive|Headers Error)"))
+            return false
+        return true
+    }
 
-    if (exitCode != 0 || RegExMatch(txt, "i)(Wrong password|Cannot open encrypted archive|Headers Error)"))
+    targetArg := (testFile != "") ? (' "' testFile '"') : ' "*"'
+    cmd := '"' SEVEN_CLI '" t -p' EscapeArg(password) ' -- "' path '"' targetArg
+    res := RunWaitStdout(cmd)
+    if (res.exitCode != 0 || RegExMatch(res.output, "i)(Wrong password|Cannot open encrypted archive|Headers Error|Data Error)"))
         return false
     return true
+}
+
+RunWaitStdout(cmd, cwd := "") {
+    sa := Buffer(24, 0)
+    NumPut("uint", 24, sa, 0)
+    NumPut("ptr", 0, sa, 8)
+    NumPut("int", 1, sa, 16)
+    hPipeR := 0, hPipeW := 0
+    if !DllCall("CreatePipe", "ptr*", &hPipeR, "ptr*", &hPipeW, "ptr", sa, "uint", 0)
+        return { output: "", exitCode: -1 }
+    DllCall("SetHandleInformation", "ptr", hPipeR, "uint", 1, "uint", 0)
+
+    si := Buffer(104, 0)
+    NumPut("uint", 104, si, 0)
+    NumPut("uint", 0x100, si, 60)
+    NumPut("ptr", hPipeW, si, 88)
+    NumPut("ptr", hPipeW, si, 96)
+
+    pi := Buffer(24, 0)
+    if !DllCall("CreateProcessW", "ptr", 0, "str", cmd, "ptr", 0, "ptr", 0, "int", 1, "uint", 0x08000000, "ptr", 0, "ptr", cwd != "" ? StrPtr(cwd) : 0, "ptr", si, "ptr", pi) {
+        DllCall("CloseHandle", "ptr", hPipeW)
+        DllCall("CloseHandle", "ptr", hPipeR)
+        return { output: "", exitCode: -1 }
+    }
+    DllCall("CloseHandle", "ptr", hPipeW)
+
+    hProcess := NumGet(pi, 0, "ptr")
+    hThread := NumGet(pi, 8, "ptr")
+    DllCall("CloseHandle", "ptr", hThread)
+
+    out := ""
+    buf := Buffer(4096, 0)
+    bytesRead := 0
+    while DllCall("ReadFile", "ptr", hPipeR, "ptr", buf, "uint", 4096, "uint*", &bytesRead, "ptr", 0) && bytesRead > 0 {
+        out .= StrGet(buf, bytesRead, "UTF-8")
+    }
+
+    DllCall("WaitForSingleObject", "ptr", hProcess, "uint", 0xFFFFFFFF)
+    exitCode := 0
+    DllCall("GetExitCodeProcess", "ptr", hProcess, "uint*", &exitCode)
+    DllCall("CloseHandle", "ptr", hProcess)
+    DllCall("CloseHandle", "ptr", hPipeR)
+    return { output: out, exitCode: exitCode }
 }
 
 Find7Zip() {
