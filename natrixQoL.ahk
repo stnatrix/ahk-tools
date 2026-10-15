@@ -15,7 +15,6 @@ if (!A_IsAdmin && !InStr(DllCall("GetCommandLine", "Str"), "/restart")) {
 }
 
 InstallKeybdHook(true, true)
-InstallMouseHook(true, true)
 
 global sevenZip := Find7Zip()
 global SEVEN_CLI := sevenZip.cli
@@ -55,15 +54,8 @@ SetupTrayMenu() {
     tray.Add("Exit", (*) => ExitApp())
 }
 
-CtrlShiftHeld() {
-    return (GetKeyState("Control", "P") || GetKeyState("Control"))
-        && (GetKeyState("Shift", "P") || GetKeyState("Shift"))
-}
-
-#HotIf CtrlShiftHeld()
-*LWin::ExtractSelection()
-*RWin::ExtractSelection()
-#HotIf
+^+LWin::ExtractSelection()
+^+RWin::ExtractSelection()
 
 #HotIf ShouldPasteImagePath()
 $^v::PasteClipboardImagePath()
@@ -71,15 +63,15 @@ $^v::PasteClipboardImagePath()
 
 ^+F2::
 {
-    SendInput("{Ctrl Up}{Shift Up}")
-    Sleep(25)
+    KeyWait("Ctrl")
+    KeyWait("Shift")
     SendText("natrix852@gmail.com")
 }
 
 ^+F3::
 {
-    SendInput("{Ctrl Up}{Shift Up}")
-    Sleep(25)
+    KeyWait("Ctrl")
+    KeyWait("Shift")
     password := GenerateComplexPassword(16)
     A_Clipboard := password
     SendText(password)
@@ -92,7 +84,7 @@ $^v::PasteClipboardImagePath()
 
 ^+F5::
 {
-    Run("https://gemini.google.com")
+    ShellRun("https://gemini.google.com")
 }
 
 GenerateComplexPassword(length := 16) {
@@ -589,6 +581,16 @@ CleanupOldTempSnips() {
     Loop Files, A_Temp "\snip_*.png" {
         if (DateDiff(A_LoopFileTimeModified, cutoff, "Seconds") < 0)
             try FileDelete(A_LoopFileFullPath)
+    }
+}
+
+ShellRun(filePath, arguments := "", directory := "", operation := "", show := 1) {
+    try {
+        static VT_UI4 := 0x13, SWC_DESKTOP := ComValue(VT_UI4, 0x8)
+        ComObject("Shell.Application").Windows.Item(SWC_DESKTOP).Document.Application
+            .ShellExecute(filePath, arguments, directory, operation, show)
+    } catch {
+        Run(filePath, directory)
     }
 }
 
